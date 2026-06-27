@@ -1,0 +1,462 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "สคริปยิงโหดๆ | Assistant",
+   LoadingTitle = "Loading Script...",
+   LoadingSubtitle = "by John",
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = "PremiumHubConfig",
+      FileName = "CombatSettings"
+   }
+})
+
+-- // Services // --
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
+
+-- // Variables & Settings // --
+local Settings = {
+    Aimbot = false,
+    FovRadius = 100,
+    FovColor = Color3.fromRGB(255, 0, 0),
+    FovVisible = true,
+    
+    ESP = false,
+    EspBoxes = true,
+    EspLines = true,
+    EspHealth = true,
+    
+    SpamIce = false,
+    KillAll = false,      -- บินยิงแบบสับปืน
+    KillAllSilent = false, -- ฟังก์ชันใหม่: ยืนนิ่งๆ ตายหมด
+    FriendCheck = false
+}
+
+-- // FOV Circle Drawing // --
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.NumSides = 60
+FOVCircle.Filled = false
+FOVCircle.Transparency = 1
+
+local function updateFOV()
+    FOVCircle.Radius = Settings.FovRadius
+    FOVCircle.Color = Settings.FovColor
+    FOVCircle.Visible = Settings.FovVisible
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+end
+
+-- // Helper Functions // --
+local function isFriend(player)
+    if not Settings.FriendCheck then return false end
+    return LocalPlayer:IsFriendsWith(player.UserId)
+end
+
+local function getClosestPlayerInFOV()
+    local closestPlayer = nil
+    local shortestDistance = Settings.FovRadius
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and not isFriend(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            local pos, onScreen = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
+            if onScreen then
+                local distance = (Vector2.new(pos.X, pos.Y) - Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)).Magnitude
+                if distance < shortestDistance then
+                    closestPlayer = player
+                    shortestDistance = distance
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+-- // Shoot Remote Wrapper (ดึงอาวุธจาก Backpack อัตโนมัติถ้าไม่ได้ถือ) // --
+local function fireWeapon(targetPlayer, weaponName)
+    local char = LocalPlayer.Character
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    local weapon = (char and char:FindFirstChild(weaponName)) or (bp and bp:FindFirstChild(weaponName))
+    if not weapon then return end
+    
+    local targetPart = targetPlayer.Character and targetPlayer.Character:FindFirstChild("Head")
+    if not targetPart then return end
+
+    local originPos = char and char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position or Vector3.new(0,0,0)
+    local targetPos = targetPart.Position
+    local direction = (targetPos - originPos).Unit
+
+    -- W__red (Shot Trigger)
+    local argsRed = {
+        weapon,
+        {
+            id = 1,
+            charge = 0,
+            origin = vector.create(originPos.X, originPos.Y, originPos.Z),
+            dir = vector.create(direction.X, direction.Y, direction.Z)
+        }
+    }
+    pcall(function()
+        ReplicatedStorage:WaitForChild("Routers"):WaitForChild("WeaponSystemRemotes"):WaitForChild("W__red"):FireServer(unpack(argsRed))
+    end)
+
+    -- W__it (Hit Register)
+    local argsIt = {
+        weapon,
+        {
+            p = vector.create(targetPos.X, targetPos.Y, targetPos.Z),
+            pid = 1,
+            part = targetPart,
+            d = (targetPos - originPos).Magnitude,
+            maxDist = 1000,
+            h = targetPart.Parent,
+            m = Enum.Material.Brick,
+            n = vector.create(0, 1, 0),
+            t = 0.1,
+            sid = 1
+        }
+    }
+    pcall(function()
+        ReplicatedStorage:WaitForChild("Routers"):WaitForChild("WeaponSystemRemotes"):WaitForChild("W__it"):FireServer(unpack(argsIt))
+    end)
+end
+
+-- // ฟังก์ชัน Auto Play เมื่อตาย // --
+local function listenToDeath(character)
+    local humanoid = character:WaitForChild("Humanoid", 5)
+    if humanoid then
+        humanoid.Died:Connect(function()
+            task.wait(0.5) -- หน่วงเวลาเล็กน้อยหลังตายป้องกันบั๊ก
+            local args = { true }
+            pcall(function()
+                ReplicatedStorage:WaitForChild("Routers"):WaitForChild("GameRemotes"):WaitForChild("Play"):FireServer(unpack(args))
+            end)
+        end)
+    end
+end
+if LocalPlayer.Character then listenToDeath(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(listenToDeath)
+
+-- // Main Combat Loop // --
+RunService.RenderStepped:Connect(function()
+    updateFOV()
+    
+    if Settings.Aimbot then
+        local target = getClosestPlayerInFOV()
+        if target and target.Character and target.Character:FindFirstChild("Head") then
+            local char = LocalPlayer.Character
+            if char then
+                if char:FindFirstChild("UMP45") or LocalPlayer.Backpack:FindFirstChild("UMP45") then
+                    fireWeapon(target, "UMP45")
+                elseif char:FindFirstChild("M4A1") or LocalPlayer.Backpack:FindFirstChild("M4A1") then
+                    fireWeapon(target, "M4A1")
+                end
+            end
+        end
+    end
+end)
+
+-- // ESP System // --
+local cache = {}
+local function createESP(player)
+    if cache[player] then return end
+    
+    local box = Drawing.new("Square")
+    box.Thickness = 1
+    box.Filled = false
+    box.Color = Color3.fromRGB(255, 255, 255)
+    
+    local line = Drawing.new("Line")
+    line.Thickness = 1
+    line.Color = Color3.fromRGB(255, 255, 255)
+    
+    local healthText = Drawing.new("Text")
+    healthText.Size = 14
+    healthText.Center = true
+    healthText.Outline = true
+    healthText.Color = Color3.fromRGB(0, 255, 0)
+
+    cache[player] = {box = box, line = line, healthText = healthText}
+    
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        if not player.Parent or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") or not player.Character:FindFirstChild("Humanoid") or player.Character.Humanoid.Health <= 0 then
+            box.Visible = false
+            line.Visible = false
+            healthText.Visible = false
+            if not player.Parent then
+                box:Remove()
+                line:Remove()
+                healthText:Remove()
+                cache[player] = nil
+                connection:Disconnect()
+            end
+            return
+        end
+
+        local hrp = player.Character.HumanoidRootPart
+        local hum = player.Character.Humanoid
+        local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+        
+        if onScreen and Settings.ESP then
+            if Settings.EspBoxes then
+                box.Size = Vector2.new(2000 / pos.Z, 3000 / pos.Z)
+                box.Position = Vector2.new(pos.X - box.Size.X / 2, pos.Y - box.Size.Y / 2)
+                box.Color = isFriend(player) and Color3.fromRGB(0, 255, 255) or Color3.fromRGB(255, 255, 255)
+                box.Visible = true
+            else
+                box.Visible = false
+            end
+            
+            local isTargetedByFov = false
+            if Settings.Aimbot then
+                local currentTarget = getClosestPlayerInFOV()
+                if currentTarget == player then
+                    isTargetedByFov = true
+                end
+            end
+
+            if Settings.EspLines or isTargetedByFov then
+                line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                line.To = Vector2.new(pos.X, pos.Y)
+                if isTargetedByFov then
+                    line.Color = Color3.fromRGB(255, 0, 0)
+                elseif isFriend(player) then
+                    line.Color = Color3.fromRGB(0, 255, 255)
+                else
+                    line.Color = Color3.fromRGB(255, 255, 255)
+                end
+                line.Visible = true
+            else
+                line.Visible = false
+            end
+            
+            if Settings.EspHealth then
+                healthText.Text = (isFriend(player) and "[FRIEND] " or "") .. "HP: " .. math.floor(hum.Health) .. "/" .. math.floor(hum.MaxHealth)
+                healthText.Position = Vector2.new(pos.X, pos.Y - (3500 / pos.Z) / 2 - 15)
+                healthText.Visible = true
+            else
+                healthText.Visible = false
+            end
+        else
+            box.Visible = false
+            line.Visible = false
+            healthText.Visible = false
+        end
+    end)
+end
+
+Players.PlayerAdded:Connect(createESP)
+for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then createESP(p) end end
+
+-- // Loops for Exploits (Ice Spam / Kill All / Kill All Silent) // --
+
+-- 1. Ice Spam Loop
+task.spawn(function()
+    while true do
+        if Settings.SpamIce then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and not isFriend(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    task.spawn(function()
+                        local pPos = player.Character.HumanoidRootPart.Position
+                        local args = {
+                            vector.create(pPos.X, pPos.Y, pPos.Z),
+                            6.341584584095973
+                        }
+                        ReplicatedStorage:WaitForChild("Routers"):WaitForChild("BuildingSystemRemotes"):WaitForChild("PlaceIce"):FireServer(unpack(args))
+                    end)
+                end
+            end
+        end
+        task.wait()
+    end
+end)
+
+-- 2. Kill All บินยิง + สับปืนรัวๆ (Fast Gun Switch Loop)
+task.spawn(function()
+    while true do
+        if Settings.KillAll then
+            local char = LocalPlayer.Character
+            local bp = LocalPlayer:FindFirstChild("Backpack")
+            
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and not isFriend(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+                    local targetHrp = player.Character.HumanoidRootPart
+                    
+                    if char and char:FindFirstChild("HumanoidRootPart") then
+                        -- บินกึ่งวาร์ปอยู่เหนือหัวศัตรู
+                        char.HumanoidRootPart.CFrame = targetHrp.CFrame * CFrame.new(0, 10, 0)
+                        
+                        -- ระบบสับปืน ถือปืน/เก็บปืน สลับ 2 กระบอกอย่างรวดเร็ว
+                        local ump = bp:FindFirstChild("UMP45") or char:FindFirstChild("UMP45")
+                        local m4 = bp:FindFirstChild("M4A1") or char:FindFirstChild("M4A1")
+                        
+                        if ump then
+                            ump.Parent = char     -- ถือ UMP45
+                            fireWeapon(player, "UMP45")
+                            task.wait(0.01)
+                            ump.Parent = bp       -- เก็บ UMP45
+                        end
+                        
+                        if m4 then
+                            m4.Parent = char      -- ถือ M4A1
+                            fireWeapon(player, "M4A1")
+                            task.wait(0.01)
+                            m4.Parent = bp        -- เก็บ M4A1
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.05)
+    end
+end)
+
+-- 3. New Feature: Kill All Silent (ยืนนิ่งๆ ไม่ต้องถือปืน ไม่ต้องย้ายตัว ตายหมดห้อง)
+task.spawn(function()
+    while true do
+        if Settings.KillAllSilent then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and not isFriend(player) and player.Character and player.Character:FindFirstChild("Head") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+                    -- ยิงกระสุนจากรีโมทตรงไปที่หัวศัตรูโดยตรงจากทุกกระบอกที่มีในตัว (สลับยิงทันทีแบบไม่ต้องสวมใส่เข้าตัวละคร)
+                    task.spawn(function()
+                        fireWeapon(player, "UMP45")
+                        fireWeapon(player, "M4A1")
+                    end)
+                end
+            end
+        end
+        task.wait(0.1) -- ความถี่ในการสาดความเสียหายใส่ทุกคนรอบห้องแบบ Silent
+    end
+end)
+
+
+-- // --- UI TABS & ELEMENTS --- // --
+
+local CombatTab = Window:CreateTab("Combat & FOV", 4483362458)
+local EspTab = Window:CreateTab("Visuals & ESP", 4483362458)
+local ExploitTab = Window:CreateTab("Exploits & Kill", 4483362458)
+local NewFeatureTab = Window:CreateTab("🌟 New Features", 4483362458) -- หมวดหมู่ใหม่แยกเฉพาะ
+
+-- [ COMBAT TAB ]
+CombatTab:CreateToggle({
+   Name = "เปิดระบบ Lock Head & Auto Shoot",
+   CurrentValue = false,
+   Flag = "AimbotToggle",
+   Callback = function(Value)
+       Settings.Aimbot = Value
+   end,
+})
+
+CombatTab:CreateToggle({
+   Name = "🛡️ เปิดระบบป้องกันเพื่อน (Friend Check)",
+   CurrentValue = false,
+   Flag = "FriendCheckToggle",
+   Callback = function(Value)
+       Settings.FriendCheck = Value
+   end,
+})
+
+CombatTab:CreateToggle({
+   Name = "แสดงวงกลม FOV",
+   CurrentValue = true,
+   Flag = "FovVisible",
+   Callback = function(Value)
+       Settings.FovVisible = Value
+   end,
+})
+
+CombatTab:CreateSlider({
+   Name = "ปรับขนาดวงกลม FOV",
+   Range = {30, 500},
+   Increment = 5,
+   Suffix = " Pixels",
+   CurrentValue = 100,
+   Flag = "FovSlider",
+   Callback = function(Value)
+       Settings.FovRadius = Value
+   end,
+})
+
+CombatTab:CreateColorPicker({
+    Name = "เปลี่ยนสีวงกลม FOV",
+    Color = Color3.fromRGB(255, 0, 0),
+    Flag = "FovColor",
+    Callback = function(Value)
+        Settings.FovColor = Value
+    end
+})
+
+-- [ ESP TAB ]
+EspTab:CreateToggle({
+   Name = "เปิดระบบ ESP (รวม)",
+   CurrentValue = false,
+   Flag = "MainEsp",
+   Callback = function(Value)
+       Settings.ESP = Value
+   end,
+})
+
+EspTab:CreateToggle({
+   Name = "เปิดขอบสี่เหลี่ยม (ESP Box)",
+   CurrentValue = true,
+   Flag = "EspBox",
+   Callback = function(Value)
+       Settings.EspBoxes = Value
+   end,
+})
+
+EspTab:CreateToggle({
+   Name = "เปิดเส้นชี้ (ESP Lines)",
+   CurrentValue = true,
+   Flag = "EspLine",
+   Callback = function(Value)
+       Settings.EspLines = Value
+   end,
+})
+
+EspTab:CreateToggle({
+   Name = "แสดงหลอดเลือด / ตัวเลขเลือด (ESP Health)",
+   CurrentValue = true,
+   Flag = "EspHealth",
+   Callback = function(Value)
+       Settings.EspHealth = Value
+   end,
+})
+
+-- [ EXPLOIT TAB ]
+ExploitTab:CreateToggle({
+   Name = "ยิงรีโมท Ice Spam รัวๆ (ตัวไม่วาร์ป + ข้ามเพื่อน)",
+   CurrentValue = false,
+   Flag = "IceSpam",
+   Callback = function(Value)
+       Settings.SpamIce = Value
+   end,
+})
+
+ExploitTab:CreateToggle({
+   Name = "ฆ่าทุกคน (Kill All + บินเหนือหัว + สับปืนรัวๆ)",
+   CurrentValue = false,
+   Flag = "KillAllToggle",
+   Callback = function(Value)
+       Settings.KillAll = Value
+   end,
+})
+
+-- [ 🌟 NEW FEATURES TAB ] (หมวดหมู่ใหม่)
+NewFeatureTab:CreateToggle({
+   Name = "💀 Kill All Silent (ยืนนิ่งๆ ตายยกห้อง ไม่ต้องถือปืน)",
+   CurrentValue = false,
+   Flag = "KillAllSilentToggle",
+   Callback = function(Value)
+       Settings.KillAllSilent = Value
+   end,
+})
+
+NewFeatureTab:CreateParagraph({Title = "💡 ระบบ Auto Respawn", Content = "ระบบกดเกิดให้อัตโนมัติ (Auto Play On Death) ถูกเปิดใช้งานแบบถาวรในเบื้องหลังแล้ว เมื่อคุณตายสคริปต์จะกดส่งรีโมทเกิดใหม่ให้ทันที 1 ครั้ง"})
+
+Rayfield:LoadConfiguration()
